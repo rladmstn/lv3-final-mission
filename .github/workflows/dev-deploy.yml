@@ -1,0 +1,67 @@
+name: Dev Server CI/CD
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 레포지토리 체크아웃
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. JDK 21 설정
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      # 3. application.yml 생성
+      - name: Create application.yml from secrets
+        run: |
+          mkdir -p src/main/resources
+          echo "${{ secrets.APPLICATION_DEV_PROPERTIES }}" > src/main/resources/application.yml
+#
+#          mkdir -p src/test/resources
+#          echo "${{ secrets.APPLICATION_TEST_PROPERTIES }}" > src/test/resources/application.yml
+
+      # 4. Gradle 빌드
+      - name: Build JAR
+        run: ./gradlew clean build -x test
+
+      # 5. SSH를 통해 Dev 서버로 배포
+      - name: Deploy to Dev Server
+        uses: appleboy/ssh-action@v0.1.8
+        with:
+          host: ${{ secrets.DEV_SERVER_HOST }}
+          username: ${{ secrets.DEV_SERVER_USER }}
+          key: ${{ secrets.DEV_SERVER_SSH_KEY }}
+          port: ${{ secrets.DEV_SERVER_PORT }}
+          script: |
+            set -e
+
+            # 배포 디렉토리
+            APP_DIR=/home/${{ secrets.DEV_SERVER_USER }}/bom-bom-server
+            JAR_NAME=bom-bom-server.jar
+
+            # 기존 서비스 종료
+            if pgrep -f "$JAR_NAME" > /dev/null; then
+              echo "Stopping existing service..."
+              pkill -f "$JAR_NAME"
+            fi
+
+            # 새 JAR 업로드
+            mkdir -p $APP_DIR
+            echo "Uploading JAR..."
+            scp -i ${{ secrets.DEV_SERVER_SSH_KEY }} ./build/libs/*.jar ${{ secrets.DEV_SERVER_USER }}@${{ secrets.DEV_SERVER_HOST }}:$APP_DIR/$JAR_NAME
+
+            # 서비스 시작
+            echo "Starting service..."
+            nohup java -jar $APP_DIR/$JAR_NAME > $APP_DIR/nohup.out 2>&1 &
+            echo "Deployment complete!"
