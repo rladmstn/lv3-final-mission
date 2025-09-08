@@ -63,16 +63,16 @@ jobs:
       - name: Docker 이미지 Pull
         run: |
           IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/piglet-prod:latest
-          docker pull $IMAGE
+          sudo docker pull $IMAGE
 
       - name: 이미지 변경 여부 확인
         id: compare_digest
         run: |
           IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/piglet-prod:latest
-          NEW=$(docker inspect --format='{{.Id}}' "$IMAGE")
+          NEW=$(sudo docker inspect --format='{{.Id}}' "$IMAGE")
           
-          if docker inspect piglet-prod &>/dev/null; then
-            CURRENT=$(docker inspect --format='{{.Image}}' piglet-prod)
+          if sudo docker inspect piglet-prod &>/dev/null; then
+            CURRENT=$(sudo docker inspect --format='{{.Image}}' piglet-prod)
           else
             CURRENT="not_found"
           fi
@@ -90,11 +90,11 @@ jobs:
       - name: 컨테이너 제거 및 재실행
         if: env.skip_deploy == 'false'
         run: |
-          docker compose -f docker-compose-prod.yml down --remove-orphans || true
-          docker compose -f docker-compose-prod.yml up -d
+          sudo docker compose -f docker-compose-prod.yml down --remove-orphans || true
+          sudo docker compose -f docker-compose-prod.yml up -d
 
       - name: Docker 리소스 정리
         if: env.skip_deploy == 'false'
         run: |
-          docker container prune -f --filter "until=24h"
-          docker image prune -f --filter "until=24h"
+          sudo docker container prune -f --filter "until=24h"
+          sudo docker image prune -f --filter "until=24h"
