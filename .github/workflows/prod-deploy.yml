@@ -1,0 +1,59 @@
+name: Prod Server CI/CD
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Create application.yml from secrets
+        run: |
+          mkdir -p src/main/resources
+          echo "${{ secrets.APPLICATION_PROD_PROPERTIES }}" > src/main/resources/application.yml
+
+      - name: Build JAR
+        run: ./gradlew clean build -x test
+
+      - name: Deploy to Prod Server
+        uses: appleboy/ssh-action@v0.1.8
+        with:
+          host: ${{ secrets.PROD_SERVER_HOST }}
+          username: ${{ secrets.PROD_SERVER_USER }}
+          key: ${{ secrets.PROD_SERVER_SSH_KEY }}
+          port: ${{ secrets.PROD_SERVER_PORT }}
+          script: |
+            set -e
+
+            # 배포 디렉토리
+            APP_DIR=/home/${{ secrets.PROD_SERVER_USER }}
+            JAR_NAME=lv3-final-mission-0.0.1-SNAPSHOT.jar
+
+            # 기존 서비스 종료
+            if pgrep -f "$JAR_NAME" > /dev/null; then
+              echo "Stopping existing service..."
+              pkill -f "$JAR_NAME"
+            fi
+
+            # 새 JAR 업로드
+            mkdir -p $APP_DIR
+            echo "Uploading JAR..."
+            scp -i ${{ secrets.DEV_SERVER_SSH_KEY }} ./build/libs/*.jar ${{ secrets.DEV_SERVER_USER }}@${{ secrets.DEV_SERVER_HOST }}:$APP_DIR/$JAR_NAME
+
+            # 서비스 시작
+            echo "Starting service..."
+            nohup java -jar $APP_DIR/$JAR_NAME > $APP_DIR/nohup.out 2>&1 &
+            echo "Deployment complete!"
