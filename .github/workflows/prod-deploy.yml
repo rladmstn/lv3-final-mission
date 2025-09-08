@@ -51,7 +51,7 @@ jobs:
             # 새 JAR 업로드
             mkdir -p $APP_DIR
             echo "Uploading JAR..."
-            scp -i ${{ secrets.DEV_SERVER_SSH_KEY }} ./build/libs/*.jar ${{ secrets.DEV_SERVER_USER }}@${{ secrets.DEV_SERVER_HOST }}:$APP_DIR/$JAR_NAME
+            scp -i ${{ secrets.PROD_SERVER_SSH_KEY }} ./build/libs/*.jar ${{ secrets.PROD_SERVER_USER }}@${{ secrets.PROD_SERVER_HOST }}:$APP_DIR/$JAR_NAME
 
             # 서비스 시작
             echo "Starting service..."
