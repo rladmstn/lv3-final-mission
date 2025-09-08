@@ -45,6 +45,7 @@ jobs:
             docker buildx use ci-builder
           fi
           docker buildx build \
+            -f ./Dockerfile \
             --platform linux/arm64,linux/amd64 \
             --cache-from=type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/piglet-prod:buildcache \
             --cache-to=type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/piglet-prod:buildcache,mode=max \
