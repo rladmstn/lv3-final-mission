@@ -28,32 +28,30 @@ jobs:
       - name: Build JAR
         run: ./gradlew clean build -x test
 
+      - name: Save SSH key
+        run: |
+          echo "${{ secrets.PROD_SERVER_SSH_KEY }}" > prod.pem
+          chmod 400 prod.pem
+
       - name: Deploy to Prod Server
-        uses: appleboy/ssh-action@v0.1.8
-        with:
-          host: ${{ secrets.PROD_SERVER_HOST }}
-          username: ${{ secrets.PROD_SERVER_USER }}
-          key: ${{ secrets.PROD_SERVER_SSH_KEY }}
-          port: ${{ secrets.PROD_SERVER_PORT }}
-          script: |
-            set -e
+        run: |
+          set -e
+          APP_DIR=/home/${{ secrets.PROD_SERVER_USER }}/lv3-final-mission
+          JAR_NAME=lv3-final-mission-0.0.1-SNAPSHOT.jar
 
-            # 배포 디렉토리
-            APP_DIR=/home/${{ secrets.PROD_SERVER_USER }}
-            JAR_NAME=lv3-final-mission-0.0.1-SNAPSHOT.jar
+          # 기존 서비스 종료
+          if ssh -i prod.pem -p ${{ secrets.PROD_SERVER_PORT }} ${{ secrets.PROD_SERVER_USER }}@${{ secrets.PROD_SERVER_HOST }} "pgrep -f $JAR_NAME" > /dev/null; then
+            echo "Stopping existing service..."
+            ssh -i prod.pem -p ${{ secrets.PROD_SERVER_PORT }} ${{ secrets.PROD_SERVER_USER }}@${{ secrets.PROD_SERVER_HOST }} "pkill -f $JAR_NAME"
+          fi
 
-            # 기존 서비스 종료
-            if pgrep -f "$JAR_NAME" > /dev/null; then
-              echo "Stopping existing service..."
-              pkill -f "$JAR_NAME"
-            fi
+          # 배포 디렉토리 생성
+          ssh -i prod.pem -p ${{ secrets.PROD_SERVER_PORT }} ${{ secrets.PROD_SERVER_USER }}@${{ secrets.PROD_SERVER_HOST }} "mkdir -p $APP_DIR"
 
-            # 새 JAR 업로드
-            mkdir -p $APP_DIR
-            echo "Uploading JAR..."
-            scp -i ${{ secrets.PROD_SERVER_SSH_KEY }} ./build/libs/*.jar ${{ secrets.PROD_SERVER_USER }}@${{ secrets.PROD_SERVER_HOST }}:$APP_DIR/$JAR_NAME
+          # JAR 업로드
+          scp -i prod.pem -P ${{ secrets.PROD_SERVER_PORT }} ./build/libs/*.jar ${{ secrets.PROD_SERVER_USER }}@${{ secrets.PROD_SERVER_HOST }}:$APP_DIR/$JAR_NAME
 
-            # 서비스 시작
-            echo "Starting service..."
-            nohup java -jar $APP_DIR/$JAR_NAME > $APP_DIR/nohup.out 2>&1 &
-            echo "Deployment complete!"
+          # 서비스 시작
+          ssh -i prod.pem -p ${{ secrets.PROD_SERVER_PORT }} ${{ secrets.PROD_SERVER_USER }}@${{ secrets.PROD_SERVER_HOST }} "nohup java -jar $APP_DIR/$JAR_NAME > $APP_DIR/nohup.out 2>&1 &"
+
+          echo "Deployment complete!"
