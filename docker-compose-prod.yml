@@ -1,0 +1,11 @@
+version: "3.9"
+
+services:
+  piglet-prod:
+    image: rladmstn/piglet-prod:latest
+    container_name: piglet-prod
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./logs:/logs
+    restart: always
