@@ -6,54 +6,95 @@ on:
       - dev
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: 코드 체크아웃
         uses: actions/checkout@v4
 
-      - name: Set up JDK
+      - name: JDK 21 설정
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
           java-version: 21
+          distribution: temurin
           cache: gradle
 
-      - name: Create application.yml from secrets
+      - name: application.yml 생성
         run: |
           mkdir -p src/main/resources
           echo "${{ secrets.APPLICATION_DEV_PROPERTIES }}" > src/main/resources/application.yml
 
-      - name: Build JAR
-        run: ./gradlew clean build -x test
+      - name: JAR 빌드
+        run: ./gradlew build --no-daemon
 
-      - name: Deploy to Dev Server
-        uses: appleboy/ssh-action@v0.1.8
+      - name: Docker Buildx 설정
+        uses: docker/setup-buildx-action@v3
+
+      - name: DockerHub 로그인
+        uses: docker/login-action@v3
         with:
-          host: ${{ secrets.DEV_SERVER_HOST }}
-          username: ${{ secrets.DEV_SERVER_USER }}
-          key: ${{ secrets.DEV_SERVER_SSH_KEY }}
-          port: ${{ secrets.DEV_SERVER_PORT }}
-          script: |
-            set -e
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-            # 배포 디렉토리
-            APP_DIR=/home/${{ secrets.DEV_SERVER_USER }}
-            JAR_NAME=lv3-final-mission-0.0.1-SNAPSHOT.jar
+      - name: Docker 이미지 빌드 및 푸시
+        run: |
+          if ! docker buildx inspect ci-builder &>/dev/null; then
+            docker buildx create --use --name ci-builder
+          else
+            docker buildx use ci-builder
+          fi
+          docker buildx build \
+            -f ./Dockerfile \
+            --platform linux/arm64,linux/amd64 \
+            --cache-from=type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/piglet-dev:buildcache \
+            --cache-to=type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/piglet-dev:buildcache,mode=max \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/piglet-dev:latest \
+            --push .
 
-            # 기존 서비스 종료
-            if pgrep -f "$JAR_NAME" > /dev/null; then
-              echo "Stopping existing service..."
-              pkill -f "$JAR_NAME"
-            fi
+  deploy:
+    needs: build
+    runs-on: [ self-hosted, dev ]
 
-            # 새 JAR 업로드
-            mkdir -p $APP_DIR
-            echo "Uploading JAR..."
-            scp -i ${{ secrets.DEV_SERVER_SSH_KEY }} ./build/libs/*.jar ${{ secrets.DEV_SERVER_USER }}@${{ secrets.DEV_SERVER_HOST }}:$APP_DIR/$JAR_NAME
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
 
-            # 서비스 시작
-            echo "Starting service..."
-            nohup java -jar $APP_DIR/$JAR_NAME > $APP_DIR/nohup.out 2>&1 &
-            echo "Deployment complete!"
+      - name: Docker 이미지 Pull
+        run: |
+          IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/piglet-dev:latest
+          sudo docker pull $IMAGE
+
+      - name: 이미지 변경 여부 확인
+        id: compare_digest
+        run: |
+          IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/piglet-dev:latest
+          NEW=$(sudo docker inspect --format='{{.Id}}' "$IMAGE")
+          
+          if sudo docker inspect piglet-dev &>/dev/null; then
+            CURRENT=$(sudo docker inspect --format='{{.Image}}' piglet-dev)
+          else
+            CURRENT="not_found"
+          fi
+          
+          echo "new_image_id=$NEW" >> $GITHUB_OUTPUT
+          echo "current_image_id=$CURRENT" >> $GITHUB_OUTPUT
+          
+          if [ "$NEW" = "$CURRENT" ]; then
+            echo "Image unchanged. Skipping deployment."
+            echo "skip_deploy=true" >> $GITHUB_ENV
+          else
+            echo "skip_deploy=false" >> $GITHUB_ENV
+          fi
+
+      - name: 컨테이너 제거 및 재실행
+        if: env.skip_deploy == 'false'
+        run: |
+          sudo docker compose -f docker-compose-dev.yml down --remove-orphans || true
+          sudo docker compose -f docker-compose-dev.yml up -d
+
+      - name: Docker 리소스 정리
+        if: env.skip_deploy == 'false'
+        run: |
+          sudo docker container prune -f --filter "until=24h"
+          sudo docker image prune -f --filter "until=24h"
